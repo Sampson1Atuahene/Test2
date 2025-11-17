@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Dot Classifier Trainer (Demo)</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 20px;
+      background: #f5f5f5;
+    }
+
+    h1 {
+      text-align: center;
+      margin-bottom: 10px;
+    }
+
+    .container {
+      max-width: 1100px;
+      margin: 0 auto;
+      background: #ffffff;
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+    }
+
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 16px;
+      margin-bottom: 10px;
+    }
+
+    .control-group {
+      min-width: 180px;
+    }
+
+    .control-group label {
+      display: block;
+      font-size: 0.85rem;
+      margin-bottom: 4px;
+    }
+
+    .control-group input,
+    .control-group select {
+      width: 100%;
+      padding: 4px 6px;
+      box-sizing: border-box;
+    }
+
+    .buttons {
+      margin-top: 10px;
+    }
+
+    .buttons button {
+      margin-right: 8px;
+      padding: 6px 12px;
+    }
+
+    .content {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 24px;
+      align-items: flex-start;
+      margin-top: 15px;
+    }
+
+    .preview-panel {
+      flex: 0 0 220px;
+      text-align: center;
+    }
+
+    .preview-panel canvas {
+      background: #3b3b3b;
+      border-radius: 4px;
+    }
+
+    .status {
+      margin-top: 8px;
+      font-size: 0.9rem;
+    }
+
+    .chart-panel {
+      flex: 1;
+      min-width: 300px;
+    }
+
+    .chart-panel canvas {
+      background: #ffffff;
+    }
+
+    .hyperparams {
+      font-size: 0.9rem;
+      margin-top: 4px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Dot Classifier Trainer (Simulated)</h1>
+
+    <!-- TOP CONTROLS (matching professor’s description) -->
+    <div class="controls">
+      <div class="control-group">
+        <label for="numDots">Number of dot classes (1–9)</label>
+        <input type="number" id="numDots" min="1" max="9" value="6" />
+      </div>
+
+      <div class="control-group">
+        <label for="batchSize">Batch size</label>
+        <input type="number" id="batchSize" min="1" value="64" />
+      </div>
+
+      <div class="control-group">
+        <label for="epochs">Epochs (≤ 8 recommended)</label>
+        <input type="number" id="epochs" min="1" value="8" />
+      </div>
+
+      <div class="control-group">
+        <label for="updateEvery">Update every N batches</label>
+        <input type="number" id="updateEvery" min="1" value="1" />
+      </div>
+
+      <div class="control-group">
+        <label for="trainSteps">Train steps / epoch</label>
+        <input type="number" id="trainSteps" min="1" value="100" />
+      </div>
+
+      <div class="control-group">
+        <label for="valSteps">Val steps / epoch</label>
+        <input type="number" id="valSteps" min="1" value="20" />
+      </div>
+
+      <div class="control-group">
+        <label for="imageSize">Image size (pixels)</label>
+        <select id="imageSize">
+          <option value="64" selected>64 × 64</option>
+          <option value="32">32 × 32</option>
+        </select>
+      </div>
+
+      <div class="control-group">
+        <label>Dot radius (min / max pixels)</label>
+        <div style="display:flex; gap:4px;">
+          <input type="number" id="minRadius" min="1" value="2" />
+          <input type="number" id="maxRadius" min="1" value="7" />
+        </div>
+      </div>
+
+      <div class="control-group">
+        <label for="overlap">Allow overlap</label>
+        <input type="checkbox" id="overlap" />
+      </div>
+
+      <!-- FIXED HYPERPARAMETERS: OPTIMIZER + LR -->
+      <div class="control-group">
+        <label for="optimizer">Optimizer</label>
+        <input type="text" id="optimizer" value="Adam" readonly />
+      </div>
+
+      <div class="control-group">
+        <label for="learningRate">Learning rate</label>
+        <input type="number" id="learningRate" value="0.001" step="0.0001" readonly />
+      </div>
+    </div>
+
+    <div class="buttons">
+      <button id="startBtn">Start training</button>
+      <button id="pauseBtn">Pause</button>
+      <button id="resetBtn">Reset</button>
+    </div>
+
+    <div class="content">
+      <!-- LEFT: IMAGE PREVIEW & STATUS -->
+      <div class="preview-panel">
+        <canvas id="previewCanvas" width="128" height="128"></canvas>
+        <div class="status">
+          <div id="statusText">Idle</div>
+          <div id="metricText">Loss: – | Acc: –</div>
+          <div id="batchText">Epoch: 0 / 0 &nbsp; Batch: 0</div>
+          <div class="hyperparams" id="hyperText">
+            Optimizer: Adam &nbsp; | &nbsp; LR = 0.001
+          </div>
+        </div>
+        <p style="font-size:0.8rem;margin-top:6px;">
+          Preview shows the first image of the latest batch.
+        </p>
+      </div>
+
+      <!-- RIGHT: ACCURACY CHART -->
+      <div class="chart-panel">
+        <h3>Batch Accuracies</h3>
+        <canvas id="accChart" height="260"></canvas>
+      </div>
+    </div>
+
+    <!-- MODEL ARCHITECTURE (printed on web page, as requested) -->
+    <h3 style="margin-top:30px;">Model Architecture & Training Setup</h3>
+    <pre id="architecture">
+Input: grayscale image (H × W × 1)
+
+Conv2D(32 filters, 3×3, activation='relu')
+MaxPool2D(2×2)
+Conv2D(64 filters, 3×3, activation='relu')
+MaxPool2D(2×2)
+Flatten()
+Dense(64, activation='relu')
+Dense(#dot_classes, activation='softmax')
+
+Optimizer: Adam
+Learning rate: 0.001
+Loss: categorical_crossentropy
+Metrics: accuracy
+    </pre>
+  </div>
+
+  <script>
+    // --------- Chart setup ----------
+    const ctx = document.getElementById('accChart');
+    const accChart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: [],
+        datasets: [
+          {
+            label: 'Train Acc (batch)',
+            data: [],
+            borderWidth: 1,
+            fill: false,
+          },
+          {
+            label: 'Val Acc (batch)',
+            data: [],
+            borderWidth: 1,
+            borderDash: [4, 3],
+            fill: false,
+          }
+        ]
+      },
+      options: {
+        animation: false,
+        responsive: true,
+        scales: {
+          x: {
+            title: { display: true, text: 'Batch' }
+          },
+          y: {
+            min: 0,
+            max: 1,
+            title: { display: true, text: 'Accuracy' }
+          }
+        }
+      }
+    });
+
+    // ---------- Training simulation ----------
+    const previewCanvas = document.getElementById('previewCanvas');
+    const pctx = previewCanvas.getContext('2d');
+
+    const statusText = document.getElementById('statusText');
+    const metricText = document.getElementById('metricText');
+    const batchText = document.getElementById('batchText');
+
+    let training = false;
+    let epoch = 0;
+    let batch = 0;
+    let totalEpochs = 0;
+    let trainSteps = 0;
+    let updateEvery = 1;
+    let progress = 0; // controls how accuracies grow
+    let loopId = null;
+
+    function drawRandomDots() {
+      const imgSize = parseInt(document.getElementById('imageSize').value, 10);
+      const minR = parseInt(document.getElementById('minRadius').value, 10);
+      const maxR = parseInt(document.getElementById('maxRadius').value, 10);
+      const numClasses = parseInt(document.getElementById('numDots').value, 10);
+      const allowOverlap = document.getElementById('overlap').checked;
+
+      // Clear canvas
+      pctx.fillStyle = '#3b3b3b';
+      pctx.fillRect(0, 0, previewCanvas.width, previewCanvas.height);
+
+      const scale = previewCanvas.width / imgSize;
+
+      const numDots = 1 + Math.floor(Math.random() * numClasses);
+      const placed = [];
+
+      for (let i = 0; i < numDots; i++) {
+        let radius = (minR + Math.random() * (maxR - minR)) * scale;
+        let x, y, ok = false;
+        for (let tries = 0; tries < 20 && !ok; tries++) {
+          x = radius + Math.random() * (previewCanvas.width - 2 * radius);
+          y = radius + Math.random() * (previewCanvas.height - 2 * radius);
+          ok = allowOverlap || placed.every(d => {
+            const dx = d.x - x, dy = d.y - y;
+            const dist = Math.sqrt(dx*dx + dy*dy);
+            return dist > d.r + radius;
+          });
+        }
+        placed.push({x, y, r: radius});
+        pctx.fillStyle = '#ffffff';
+        pctx.beginPath();
+        pctx.arc(x, y, radius, 0, Math.PI * 2);
+        pctx.fill();
+      }
+    }
+
+    function simulateBatch() {
+      if (!training) return;
+
+      batch++;
+      const globalBatch = (epoch - 1) * trainSteps + batch;
+
+      // simple "learning curve" with noise
+      progress += 0.003;
+      const trainAcc = Math.min(0.2 + progress + (Math.random() - 0.5) * 0.1, 1);
+      const valAcc = Math.min(0.18 + progress + (Math.random() - 0.5) * 0.12, 1);
+      const loss = Math.max(1.5 - progress * 4 + (Math.random() - 0.5) * 0.2, 0.05);
+
+      if (batch % updateEvery === 0) {
+        drawRandomDots();
+
+        accChart.data.labels.push(globalBatch);
+        accChart.data.datasets[0].data.push(trainAcc);
+        accChart.data.datasets[1].data.push(valAcc);
+        accChart.update();
+
+        metricText.textContent =
+          `Loss: ${loss.toFixed(3)} | Acc: ${trainAcc.toFixed(3)}`;
+        batchText.textContent =
+          `Epoch: ${epoch} / ${totalEpochs}   Batch: ${batch} / ${trainSteps}`;
+      }
+
+      if (batch >= trainSteps) {
+        batch = 0;
+        epoch++;
+        if (epoch > totalEpochs) {
+          training = false;
+          statusText.textContent = 'Training finished';
+          return;
+        }
+      }
+
+      loopId = setTimeout(simulateBatch, 80); // speed of training animation
+    }
+
+    function startTraining() {
+      if (training) return;
+
+      totalEpochs = parseInt(document.getElementById('epochs').value, 10);
+      trainSteps = parseInt(document.getElementById('trainSteps').value, 10);
+      updateEvery = parseInt(document.getElementById('updateEvery').value, 10) || 1;
+
+      if (epoch === 0) {
+        epoch = 1;
+        batch = 0;
+        progress = 0;
+      }
+
+      training = true;
+      statusText.textContent = 'Training…';
+      simulateBatch();
+    }
+
+    function pauseTraining() {
+      training = false;
+      statusText.textContent = 'Paused';
+      if (loopId) clearTimeout(loopId);
+    }
+
+    function resetTraining() {
+      training = false;
+      if (loopId) clearTimeout(loopId);
+
+      epoch = 0;
+      batch = 0;
+      progress = 0;
+      statusText.textContent = 'Idle';
+      metricText.textContent = 'Loss: – | Acc: –';
+      batchText.textContent = 'Epoch: 0 / 0   Batch: 0';
+
+      accChart.data.labels = [];
+      accChart.data.datasets[0].data = [];
+      accChart.data.datasets[1].data = [];
+      accChart.update();
+
+      drawRandomDots();
+    }
+
+    document.getElementById('startBtn').addEventListener('click', startTraining);
+    document.getElementById('pauseBtn').addEventListener('click', pauseTraining);
+    document.getElementById('resetBtn').addEventListener('click', resetTraining);
+
+    // initial preview
+    resetTraining();
+  </script>
+</body>
+</html>
